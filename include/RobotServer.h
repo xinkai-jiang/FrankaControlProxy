@@ -14,6 +14,27 @@
 
 #include "RobotConfig.h"
 
+template <typename T, std::size_t N>
+std::string arrayToJsonArray(const std::array<T, N>& vec) {
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < vec.size(); ++i) {
+        oss << vec[i];
+        if (i < vec.size() - 1) {
+            oss << ",";
+        }
+    }
+    oss << "]";
+    return oss.str();
+}
+
+
+template <typename T, std::size_t N>
+void addKeyValue(std::ostringstream& oss, const std::string& key, const std::array<T, N>& value) {
+    oss << "\"" << key << "\":" << arrayToJsonArray(value) << ",";
+}
+
+
 class RobotServer
 {
 private:
@@ -33,19 +54,24 @@ private:
 	RobotConfig config;
 
 	// Publisher thread: publishes "Hello World" at 100 Hz
-	void publisherTask()
+	void publisherTask(franka::Robot &robot)
 	{
+		std::vector<std::string> keys_to_send = {"name", "scores"};
 		while (isRunning)
 		{
-			// std::cout << "Publishing..." << std::endl;
-			std::string message = "Hello World";
+			franka::RobotState state = robot.readOnce();
+			// Serialize only the selected keys
+			std::ostringstream oss;
+			oss << "{";
+			addKeyValue(oss, "q", state.q);
+			addKeyValue(oss, "dq", state.dq);
+			oss << "}";
+			std::string message = oss.str();
 			zmq::message_t zmq_message(message.size());
 			memcpy(zmq_message.data(), message.data(), message.size());
 
 			pub_socket.send(zmq_message, zmq::send_flags::none);
-			// std::cout << "Published: " << message << std::endl;
-
-			std::this_thread::sleep_for(std::chrono::milliseconds(100)); // 100 Hz
+			std::this_thread::sleep_for(std::chrono::milliseconds(10)); // 100 Hz
 		}
 		std::cout << "Publisher thread stopped." << std::endl;
 	}
@@ -77,9 +103,9 @@ public:
 		// sub_socket.connect(config.getValue("SubscriberAddr"));
 		// sub_socket.set(zmq::sockopt::subscribe, "");
 		// rep_socket.bind(config.getValue("LocalServiceAddr"));
-		sub_thread = std::thread(&RobotServer::subscriberTask, this);
+		// sub_thread = std::thread(&RobotServer::subscriberTask, this);
 		// Launch threads
-		pub_thread = std::thread(&RobotServer::publisherTask, this);
+		
 		//
 		// rep_thread = std::thread(&RobotServer::serviceTask, this);
 	}
@@ -88,19 +114,20 @@ public:
 	{
 		std::cout << "RobotServer stopped and all threads joined." << std::endl;
 		// Set isRunning to false to signal threads to stop
-		isRunning = false;
+
 
 		// Join threads to ensure they stop before destruction
-		if (pub_thread.joinable())
-			pub_thread.join();
-		if (sub_thread.joinable())
-			sub_thread.join();
 		// if (rep_thread.joinable()) rep_thread.join();
+		stop();
 	}
 
 	void stop()
 	{
 		isRunning = false;
+		if (pub_thread.joinable())
+			pub_thread.join();
+		if (sub_thread.joinable())
+			sub_thread.join();
 	}
 
 	void spin()
@@ -159,6 +186,9 @@ public:
 				// Send torque command.
 				return tau_d_rate_limited;
 			};
+			
+			pub_thread = std::thread(&RobotServer::publisherTask, this, std::ref(robot));
+
 
 			std::cout << "Type 'q' to quit: " << std::endl;
 			while (true)
@@ -170,7 +200,6 @@ public:
 					std::cout << "Exiting..." << std::endl;
 					break;
 				}
-				std::cout << "You entered: " << input << std::endl;
 			}
 		}
 		catch (const franka::Exception &e)
@@ -178,5 +207,6 @@ public:
 			std::cerr << e.what() << std::endl;
 			std::cerr << "Exception" << std::endl;
 		}
+		stop();
 	}
 };
