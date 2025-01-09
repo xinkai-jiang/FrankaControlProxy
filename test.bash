@@ -1,4 +1,4 @@
 cd build
-cmake -DCMAKE_PREFIX_PATH=/home/xinkai/repository/libfranka/build/ ..
+cmake -DCMAKE_PREFIX_PATH=/home/alr_admin/robot/libfranka/build/ ..
 make
-# ./robot_config /home/xinkai/project/franka_zmq/config.cfg
+./robot_config /home/alr_admin/robot/franka_zmq/config.cfg

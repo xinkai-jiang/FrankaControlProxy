@@ -192,12 +192,11 @@ int main(int argc, char **argv)
     const std::array<double, 7> k_gains = {{60.0, 60.0, 60.0, 60.0, 25.0, 15.0, 10.0}};
     // Damping
     const std::array<double, 7> d_gains = {{50.0, 50.0, 50.0, 50.0, 30.0, 25.0, 15.0}};
-    const std::array<double, 7> q_max = {{2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973}};
-    const std::array<double, 7> q_min = {{-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973}};
+
     // Define callback for the joint torque control loop.
     std::function<franka::Torques(const franka::RobotState &, franka::Duration)>
         impedance_control_callback =
-            [&_state, &model, &k_gains, &d_gains, &q_max, &q_min](
+            [&_state, &model, &k_gains, &d_gains](
                 const franka::RobotState &state, franka::Duration) -> franka::Torques
     {
         bool in_controlled = false;
@@ -242,19 +241,7 @@ int main(int argc, char **argv)
         {
             for (size_t i = 0; i < 7; i++)
             {
-                double tolerance = (q_max[i] - q_min[i]) * 0.05;
-                if (state.q[i] > q_max[i] - tolerance)
-                {
-                    tau_d_calculated[i] = -5 * (state.q[i] - q_max[i] + tolerance) / tolerance; // Apply torque to push back to q_max[i]
-                }
-                else if (state.q[i] < q_min[i] + tolerance)
-                {
-                    tau_d_calculated[i] = 5 * (q_min[i] + tolerance - state.q[i]) / tolerance; // Apply torque to push back to q_min[i]
-                }
-                else
-                {
-                    tau_d_calculated[i] = coriolis[i];
-                }
+                tau_d_calculated[i] = coriolis[i];
             }
         }
         std::array<double, 7> tau_d_rate_limited = franka::limitRate(franka::kMaxTorqueRate, tau_d_calculated, state.tau_J_d);
