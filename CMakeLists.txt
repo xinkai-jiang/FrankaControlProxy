@@ -1,25 +1,22 @@
 cmake_minimum_required(VERSION 3.10)
-project(FRANKA_ZMQ)
+project(FRANKA_CONTROL_PROXY)
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# if(NOT FRANKA_IS_FOUND)
-#     
-# endif()
-find_package(Franka REQUIRED)
-message(STATUS "Found libfranka at: ${Franka_INCLUDE_DIRS}")
+# find_package(Franka REQUIRED)
 
 # Find libzmq package
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZMQ REQUIRED libzmq)
+find_package(yaml-cpp REQUIRED)
 
 # Include directories
-include_directories(include ${Franka_INCLUDE_DIRS})
+include_directories(include ${YAML_CPP_INCLUDE_DIR})
 
 # Add executable target
-add_executable(robot_config src/main.cpp)
+add_executable(robot src/main.cpp)
 
 # Link ZeroMQ to your target
-target_link_libraries(robot_config PRIVATE ${ZMQ_LIBRARIES} ${Franka_LIBRARIES})
+target_link_libraries(robot PRIVATE ${ZMQ_LIBRARIES} ${YAML_CPP_LIBRARIES})

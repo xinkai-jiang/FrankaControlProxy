@@ -123,6 +123,16 @@ int main(int argc, char **argv)
             return output;
         };
 
+    // human controller
+    std::function<franka::Torques(const franka::RobotState &, franka::Duration)>
+        joint_torque_callback = [](const franka::RobotState &state, franka::Duration) -> franka::Torques
+    {
+        franka::Torques zero_torques{{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
+        return zero_torques;
+    };
+
+
+
     try
     {
         robot.control(joint_position_callback);
