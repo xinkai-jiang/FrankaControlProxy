@@ -43,8 +43,8 @@ int main(int argc, char **argv)
     std::cout << "Service Address: " << service_addr << std::endl;
 
     // Read config file
-    franka::Robot robot(config.getValue("RobotIP"));
-    franka::Gripper gripper(config.getValue("RobotIP"));
+    franka::Robot robot(robot_ip);
+    franka::Gripper gripper(robot_ip);
     robot.setCollisionBehavior({{100.0, 100.0, 100.0, 100.0, 100.0, 300.0, 300.0}},
                                {{100.0, 100.0, 100.0, 100.0, 100.0, 300.0, 300.0}},
                                {{100.0, 100.0, 100.0, 100.0, 100.0, 100.0}},
@@ -53,8 +53,12 @@ int main(int argc, char **argv)
     struct
     {
         std::mutex mutex;
-        std::array<double, 9> target_joint_pose;
+        std::array<double, 7> current_joint_pose;
+        std::array<double, 7> target_joint_pose;
+        std::array<double, 2> gripper;
     } _state{};
+    franka::RobotState initial_state = robot.readOnce();
+    _state.current_joint_pose = initial_state.q;
     _state.target_joint_pose = {{0, -M_PI_4, 0, -3 * M_PI_4, 0, M_PI_2, M_PI_4}};
     std::atomic_bool running{true};
 
@@ -68,66 +72,92 @@ int main(int argc, char **argv)
 
 
     std::thread state_publish_thread(
-        [&pub_socket, &robot, &gripper, &running]() {
+        [&pub_socket, &_state, &running]() {
             while (running)
             {
                 // ...existing code...
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                std::vector<float> msg_data;
-                franka::RobotState robot_state = robot.readOnce();
-                franka::GripperState gripper_state = gripper.readOnce();
-                msg_data.insert(msg_data.end(), robot_state.q.begin(), robot_state.q.end());
-                msg_data.insert(msg_data.end(), robot_state.dq.begin(), robot_state.dq.end());
-                msg_data.push_back(static_cast<float>(gripper_state.width));
-                msg_data.push_back(static_cast<float>(gripper_state.max_width));
-                if (!msg_data.empty())
-                {
-                    pub_socket.send(zmq::buffer(msg_data.data(), msg_data.size() * sizeof(float)), 
-                                    zmq::send_flags::none);
-                }
-            }
-        });
-
-    std::thread sub_thread(
-        [&sub_socket, &running, &_state]() {
-            while (running)
-            {
-                zmq::message_t message;
-                sub_socket.recv(message, zmq::recv_flags::none);
-                if (message.size() != sizeof(std::array<double, 9>))
-                {
-                    std::cerr << "Received message size mismatch: expected " << sizeof(std::array<double, 9>)
-                              << ", got " << message.size() << std::endl;
-                    continue;
-                }
-                std::array<double, 9> target_joint_pose;
-                memcpy(target_joint_pose.data(), message.data(), message.size());
+                std::vector<double> msg_data;
+                std::array<double, 7> joint_positions;
                 if (_state.mutex.try_lock())
                 {
-                    _state.target_joint_pose = target_joint_pose;
+                    joint_positions = _state.current_joint_pose;
                     _state.mutex.unlock();
+                }
+                else
+                {
+                    continue;
+                }
+                msg_data.insert(msg_data.end(), joint_positions.begin(), joint_positions.end());
+                // msg_data.insert(msg_data.end(), robot_state.dq.begin(), robot_state.dq.end());
+                // msg_data.push_back(static_cast<float>(gripper_state.width));
+                // msg_data.push_back(static_cast<float>(gripper_state.max_width));
+                if (!msg_data.empty())
+                {
+                    pub_socket.send(zmq::buffer(msg_data.data(), msg_data.size() * sizeof(double)), 
+                                    zmq::send_flags::none);
+                    for (const auto& pos : joint_positions) {
+                        std::cout << pos << " ";
+                    }
+                    
+                    std::cout << std::endl;
                 }
             }
         });
 
+    // std::thread sub_thread(
+    //     [&sub_socket, &running, &_state]() {
+    //         while (running)
+    //         {
+    //             zmq::message_t message;
+    //             sub_socket.recv(message, zmq::recv_flags::none);
+    //             if (message.size() != sizeof(std::array<double, 9>))
+    //             {
+    //                 std::cerr << "Received message size mismatch: expected " << sizeof(std::array<double, 9>)
+    //                           << ", got " << message.size() << std::endl;
+    //                 continue;
+    //             }
+    //             std::array<double, 9> target_joint_pose;
+    //             memcpy(target_joint_pose.data(), message.data(), message.size());
+    //             if (_state.mutex.try_lock())
+    //             {
+    //                 _state.target_joint_pose = target_joint_pose;
+    //                 _state.mutex.unlock();
+    //             }
+    //         }
+    //     });
 
-    std::function<franka::JointPositions(const franka::RobotState& robot_state, franka::Duration period)> joint_position_callback =
-        [&_state](const franka::RobotState& robot_state, franka::Duration period) -> franka::JointPositions {
-            std::array<double, 7> joint_positions;
-            if (_state.mutex.try_lock())
-            {
-                joint_positions = _state.target_joint_pose;
-                _state.mutex.unlock();
-            }
-            franka::JointPositions output = franka::JointPositions(joint_positions);
-            return output;
-        };
+
+    // std::function<franka::JointPositions(const franka::RobotState& robot_state, franka::Duration period)> joint_position_callback =
+    //     [&_state](const franka::RobotState& robot_state, franka::Duration period) -> franka::JointPositions {
+    //         std::array<double, 7> joint_positions;
+    //         if (_state.mutex.try_lock())
+    //         {
+    //             joint_positions = _state.target_joint_pose;
+    //             _state.mutex.unlock();
+    //         }
+    //         franka::JointPositions output = franka::JointPositions(joint_positions);
+    //         return output;
+    //     };
 
     // human controller
     std::function<franka::Torques(const franka::RobotState &, franka::Duration)>
-        joint_torque_callback = [](const franka::RobotState &state, franka::Duration) -> franka::Torques
+        joint_torque_callback = [&_state, &model](const franka::RobotState &state, franka::Duration) -> franka::Torques
     {
         franka::Torques zero_torques{{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
+        if (_state.mutex.try_lock())
+        {
+            _state.current_joint_pose = state.q;
+            _state.mutex.unlock();
+        }
+        // zero_torques = model.coriolis(state);
+        std::array<double, 7> velocity_compliance;
+        for (size_t i = 0; i < 7; ++i) {
+            // A simple compliance controller could be a small torque based on the position error
+            // For kinesthetic teaching, we allow the human to move the robot freely
+            velocity_compliance[i] = 1.0 * state.q_d[i];  // Torque based on velocity
+        }
+    
         return zero_torques;
     };
 
@@ -135,7 +165,7 @@ int main(int argc, char **argv)
 
     try
     {
-        robot.control(joint_position_callback);
+        robot.control(joint_torque_callback);
     }
     catch(const std::exception& e)
     {
